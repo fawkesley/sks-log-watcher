@@ -201,9 +201,6 @@ def find_fingerprint(gpg_stdout):
             gpg_stdout))
 
 
-@backoff.on_exception(backoff.expo,
-                      requests.exceptions.RequestException,
-                      max_tries=4)
 def send_key_updated_message(fingerprint, updated_at):
     """
     Tell the API the given fingerprint was updated with the datetime.
