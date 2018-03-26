@@ -74,7 +74,7 @@ class HashCache():
         except FileNotFoundError:
             self._create_new_csv()
 
-        print("Loaded {} hashes".format(len(self._hashes)))
+        logging.info("Loaded {} hashes".format(len(self._hashes)))
 
     def _create_new_csv(self):
         with io.open(self._fn, 'w') as f:
@@ -92,7 +92,7 @@ def main(log_files):
 
     log_files = log_files or glob.glob(LOG_GLOB)
 
-    print('Opening {}'.format(log_files))
+    logging.info('Opening {}'.format(log_files))
 
     hash_count, success_count, partial_count, fail_count = (0, 0, 0, 0)
 
@@ -132,7 +132,7 @@ def main(log_files):
     if fail_count > 0:
         raise RuntimeError(message)
     else:
-        print(message)
+        logging.info(message)
         sys.exit(0)
 
 
@@ -270,7 +270,7 @@ class SubprocessError(RuntimeError):
 
 
 def stdout_for_subprocess(cmd_parts):
-    logging.info('Running {}'.format(' '.join(cmd_parts)))
+    logging.debug('Running {}'.format(' '.join(cmd_parts)))
     p = subprocess.Popen(
         cmd_parts,
         stdout=subprocess.PIPE,
