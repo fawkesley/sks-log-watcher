@@ -5,8 +5,10 @@ import glob
 import gzip
 import logging
 import io
-import sys
+import os
 import re
+import shutil
+import sys
 import tempfile
 import subprocess
 
@@ -17,10 +19,25 @@ import requests
 
 from utcdatetime import utcdatetime
 
+LOG_GLOB = os.environ['LOG_GLOB']
 LOG_PATTERN = r'.*sks\[\d+\]: (?P<date>\d+-\d+-\d+) (?P<time>\d+:\d+:\d+) Adding hash (?P<hash>[A-F0-9]{32})\n$'  # noqa
-KEYSERVER_URL = 'https://keyserver.paulfurley.com'
-LOG_GLOB = '/var/log/syslog*'
+
+KEYSERVER_URL = os.environ['KEYSERVER_URL']
+
+EXPIRYBOT_API_URL = os.environ['EXPIRYBOT_API_URL']
+EXPIRYBOT_API_TOKEN = os.environ['EXPIRYBOT_API_TOKEN']
+
 CACHE_CSV = pjoin(dirname(__file__), 'hashes_processed.csv')
+DEBUG_DIR = pjoin(dirname(__file__), 'failed_keys')
+
+
+class HashNoLongerExists(ValueError):
+    pass
+
+
+def backoff_slow():
+    for delay in (3, 5, 10, 10):
+        yield delay
 
 
 class HashCache():
@@ -77,25 +94,40 @@ def main(log_files):
 
     print('Opening {}'.format(log_files))
 
-    hash_count, process_count, fail_count = (0, 0, 0)
+    hash_count, success_count, partial_count, fail_count = (0, 0, 0, 0)
 
     cache = HashCache(CACHE_CSV)
 
     for updated_at, hash_ in parse_log_files(log_files):
         hash_count += 1
 
-        if hash_ not in cache:
-            try:
-                process_hash(updated_at, hash_)
-            except Exception as e:
-                logging.exception(e)  # TODO: make sure this is monitored
-                fail_count += 1
-            else:
-                cache.add_hash(hash_, updated_at)
-                process_count += 1
+        if hash_ in cache:
+            continue
 
-    message = 'Processed {} new hashes {} failed ({} hashes total)'.format(
-        process_count, fail_count, hash_count)
+        try:
+            fingerprint = get_fingerprint_from_hash(hash_)
+            logging.info('Hash {} has fingerprint {}'.format(
+                hash_, fingerprint))
+            success_count += 1
+
+        except HashNoLongerExists as e:
+            logging.warn("'hash {} no longer exists in keyserver".format(e))
+            fingerprint = None
+            partial_count += 1
+
+        except Exception as e:
+            # TODO: make sure this is monitored
+            logging.exception(e)
+            fail_count += 1
+            continue
+
+        send_key_updated_message(hash_, fingerprint, updated_at)
+        cache.add_hash(hash_, updated_at)
+
+    message = (
+        'Processed {} new hashes, {} without fingerprint, {} failed '
+        '({} hashes total)'
+    ).format(success_count, partial_count, fail_count, hash_count)
 
     if fail_count > 0:
         raise RuntimeError(message)
@@ -140,19 +172,7 @@ def parse_line(line_bytes):
         )
 
 
-def process_hash(updated_at, hash_):
-    try:
-        fingerprint = get_fingerprint_from_hash(hash_)
-    except ValueError as e:
-        logging.warn("couldn't get fingerprint for {}".format(hash_))
-        logging.exception(e)
-
-    else:
-        print('Hash {} has fingerprint {}'.format(hash_, fingerprint))
-        send_key_updated_message(fingerprint, updated_at)
-
-
-@backoff.on_exception(backoff.expo,
+@backoff.on_exception(backoff_slow,
                       requests.exceptions.RequestException,
                       max_tries=4)
 def get_fingerprint_from_hash(hash_):
@@ -168,7 +188,7 @@ def get_fingerprint_from_hash(hash_):
             NO_HASH_ERROR = 'Error handling request: Requested hash not found'
 
             if response.status_code == 500 and NO_HASH_ERROR in response.text:
-                raise ValueError('Hash no longer exists in keyserver')
+                raise HashNoLongerExists(hash_)
             else:
                 raise
 
@@ -184,8 +204,8 @@ def get_fingerprint_from_hash(hash_):
 
         try:
             stdout = stdout_for_subprocess(command)
-        except SubprocessError:
-            logging.warning('GPG failed with: {}'.format(response.text))
+        except SubprocessError as e:
+            copy_temp_file_for_debugging(f.name, hash_, e.stderr)
             raise
 
     return find_fingerprint(stdout)
@@ -201,22 +221,52 @@ def find_fingerprint(gpg_stdout):
             gpg_stdout))
 
 
-def send_key_updated_message(fingerprint, updated_at):
+def copy_temp_file_for_debugging(temp_filename, hash_, stderr):
+    key_filename = pjoin(DEBUG_DIR, '{}.asc'.format(hash_))
+    shutil.copy(temp_filename, key_filename)
+
+    error_filename = pjoin(DEBUG_DIR, '{}_stderr.txt'.format(hash_))
+
+    with io.open(error_filename, 'wb') as f:
+        f.write(stderr)
+
+    logging.info('Wrote debug file {}'.format(key_filename))
+
+
+@backoff.on_exception(backoff.constant,
+                      requests.exceptions.RequestException,
+                      interval=10, max_tries=6)
+def send_key_updated_message(sks_hash, fingerprint, updated_at):
     """
     Tell the API the given fingerprint was updated with the datetime.
     """
 
-    # NOTE: Actually just prod the web service so it attempts to sync the key
-    url = 'https://www.expirybot.com/key/0x{}/'.format(
-        fingerprint.replace(' ', ''))
+    if fingerprint is not None:
+        fingerprint = fingerprint.upper().replace(' ', '')
 
-    logging.info('Prodding {}'.format(url))
-    response = requests.get(url)
-    response.raise_for_status()
+    response = requests.post(
+        EXPIRYBOT_API_URL,
+        data={
+            'sks_hash': sks_hash,
+            'fingerprint': fingerprint,
+            'updated_at': updated_at
+        },
+        headers={
+            'Authorization': 'Token {}'.format(EXPIRYBOT_API_TOKEN),
+        }
+    )
+    try:
+        response.raise_for_status()
+    except requests.exceptions.HTTPError:
+        logging.warn(response.text)
+        raise
 
 
 class SubprocessError(RuntimeError):
-    pass
+    def __init__(self, return_code, stdout, stderr):
+        self.return_code = return_code
+        self.stdout = stdout
+        self.stderr = stderr
 
 
 def stdout_for_subprocess(cmd_parts):
@@ -234,18 +284,21 @@ def stdout_for_subprocess(cmd_parts):
         p.kill()
         stdout, stderr = p.communicate()
         logging.exception(e)
-        raise SubprocessError('Command timed out: {} \n{}\n{}'.format(
+
+        raise RuntimeError('Command timed out: {} \n{}\n{}'.format(
             p.returncode, stdout, stderr))
     else:
         if p.returncode != 0:
-            raise SubprocessError(
-                'failed with code {} stdout: {} stderr: {}'.format(
-                    p.returncode, stdout, stderr
-                )
-            )
+
+            HASH_SIZE_ERR = b'requires a 256 bit or larger hash (hash is SHA1)'
+            if p.returncode == 2 and HASH_SIZE_ERR in stderr:
+                pass
+
+            else:
+                raise SubprocessError(p.returncode, stdout, stderr)
 
     if stdout is None:
-        raise SubprocessError('Got back empty stdout')
+        raise RuntimeError('Got back empty stdout')
 
     if stderr is None:
         stderr = b''

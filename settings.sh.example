@@ -1,0 +1,9 @@
+#!/bin/sh
+
+export LOG_GLOB='/var/log/syslog*'
+
+export KEYSERVER_URL='http://pool.sks-keyservers.net:11371'
+
+export EXPIRYBOT_API_URL='https://www.expirybot.com/apiv1/key-update-messages/'
+
+export EXPIRYBOT_API_TOKEN='<token>'
