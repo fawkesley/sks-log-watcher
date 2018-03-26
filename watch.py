@@ -116,10 +116,9 @@ def main(log_files):
             partial_count += 1
 
         except Exception as e:
-            # TODO: make sure this is monitored
+            fingerprint = None
             logging.exception(e)
             fail_count += 1
-            continue
 
         send_key_updated_message(hash_, fingerprint, updated_at)
         cache.add_hash(hash_, updated_at)
