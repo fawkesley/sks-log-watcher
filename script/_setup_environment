@@ -9,6 +9,10 @@ load_secrets_environment_variables() {
   if [ -f "${REPO_DIR}/secrets.sh" ]; then
     . ${REPO_DIR}/secrets.sh
   fi
+
+  if [ -f "${REPO_DIR}/settings.sh" ]; then
+    . ${REPO_DIR}/settings.sh
+  fi
 }
 
 
