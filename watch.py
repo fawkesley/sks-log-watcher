@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import atomicfile
 import csv
 import datetime
 import glob
@@ -31,6 +32,8 @@ EXPIRYBOT_API_TOKEN = os.environ['EXPIRYBOT_API_TOKEN']
 
 CACHE_CSV = pjoin(dirname(__file__), 'hashes_processed.csv')
 DEBUG_DIR = pjoin(dirname(__file__), 'failed_keys')
+
+MAX_AGE = utcdatetime.now() - datetime.timedelta(days=8)
 
 
 class HashNoLongerExists(ValueError):
@@ -71,7 +74,28 @@ class HashCache():
         except FileNotFoundError:
             self._create_new_csv()
 
-        logging.info("Loaded {} hashes".format(len(self._hashes)))
+        logging.info("Loaded {} hashes from cache".format(len(self._hashes)))
+
+    def delete_old(self):
+        hashes, hashes_kept = (0, 0)
+
+        with io.open(self._fn, 'r') as f, \
+                atomicfile.AtomicFile(self._fn, 'w') as g:
+
+            writer = self._make_csv_writer(g)
+            writer.writeheader()
+
+            for row in csv.DictReader(f):
+                hashes += 1
+                log_datetime = utcdatetime.from_string(row['log_datetime'])
+
+                if log_datetime >= MAX_AGE:
+                    writer.writerow(row)
+                    hashes_kept += 1
+
+        logging.info("Read {} hashes from cache, kept {}".format(
+            hashes, hashes_kept
+        ))
 
     def _create_new_csv(self):
         with io.open(self._fn, 'w') as f:
@@ -124,6 +148,8 @@ def main(log_files):
 
         send_key_updated_message(hash_, fingerprint, updated_at)
         cache.add_hash(hash_, updated_at)
+
+    cache.delete_old()
 
     message = (
         'Processed {} new hashes, {} without fingerprint, {} failed '
