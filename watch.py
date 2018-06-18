@@ -49,11 +49,6 @@ class HashCache():
         self.load()
 
     def add_hash(self, hash_, updated):
-        """
-        Record the hash against its most recent updated (if the hash is already
-        in the cache, record the most recent updated_at)
-        """
-
         assert hash_ not in self
         assert hash_ not in self._hashes
 
