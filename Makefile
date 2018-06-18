@@ -14,4 +14,4 @@ venv/bin/activate: requirements-to-freeze.txt
 run: venv/bin/activate
 	. venv/bin/activate ; \
 	. ./settings.sh ; \
-	python3 watch.py >> ~/run.log
+	python3 watch.py
