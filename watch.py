@@ -99,7 +99,7 @@ def main(log_files):
 
     cache = HashCache(CACHE_CSV)
 
-    seven_days_ago = datetime.datetime.now() - datetime.timedelta(days=7)
+    seven_days_ago = utcdatetime.now() - datetime.timedelta(days=7)
 
     for updated_at, hash_ in parse_log_files(log_files):
         hash_count += 1
