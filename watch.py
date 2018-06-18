@@ -91,7 +91,7 @@ class HashCache():
 
 def main(log_files):
 
-    log_files = log_files or glob.glob(LOG_GLOB)
+    log_files = log_files or sorted(glob.glob(LOG_GLOB), reverse=True)
 
     logging.info('Opening {}'.format(log_files))
 
