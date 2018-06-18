@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import csv
+import datetime
 import glob
 import gzip
 import logging
@@ -98,8 +99,13 @@ def main(log_files):
 
     cache = HashCache(CACHE_CSV)
 
+    seven_days_ago = datetime.datetime.now() - datetime.timedelta(days=7)
+
     for updated_at, hash_ in parse_log_files(log_files):
         hash_count += 1
+
+        if updated_at < seven_days_ago:
+            continue
 
         if hash_ in cache:
             continue
