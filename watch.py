@@ -4,6 +4,7 @@ import csv
 import datetime
 import glob
 import gzip
+import hashlib
 import logging
 import io
 import os
@@ -96,7 +97,7 @@ def main(log_files):
 
     seven_days_ago = utcdatetime.now() - datetime.timedelta(days=7)
 
-    for updated_at, hash_ in parse_log_files(log_files):
+    for updated_at, hash_ in parse_log_files(log_files, cache):
         hash_count += 1
 
         if updated_at < seven_days_ago:
@@ -136,8 +137,16 @@ def main(log_files):
         sys.exit(0)
 
 
-def parse_log_files(log_files):
+def parse_log_files(log_files, cache):
     for filename in log_files:
+        file_sha256 = hash_file(filename)
+
+        if file_sha256 in cache:
+            logging.info('Already processed log file {} with sha256 {}'.format(
+                filename, file_sha256
+            ))
+            continue
+
         with flexible_open(filename, 'rb') as f:
             for line in f.readlines():
 
@@ -146,12 +155,23 @@ def parse_log_files(log_files):
                     updated_at, hash_ = parsed
                     yield (updated_at, hash_)
 
+        cache.add_hash(file_sha256, utcdatetime.now())
+
 
 def flexible_open(filename, *args, **kwargs):
     if filename.endswith('.gz'):
         return gzip.open(filename, *args, **kwargs)
     else:
         return io.open(filename, *args, **kwargs)
+
+
+def hash_file(filename, block_size=65536):
+    sha256 = hashlib.sha256()
+    with open(filename, 'rb') as f:
+        for block in iter(lambda: f.read(block_size), b''):
+            sha256.update(block)
+
+    return sha256.hexdigest()
 
 
 def parse_line(line_bytes):
