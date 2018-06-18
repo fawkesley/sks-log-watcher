@@ -1,3 +1,3 @@
 @hourly crontab < ~/app/crontab.txt
 
-*/5 * * * * cd ~/app; make run >> ~/run.log
+* * * * * cd ~/app; make run >> ~/run.log
