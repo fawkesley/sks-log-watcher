@@ -5,4 +5,4 @@ REPO_DIR=$(dirname ${THIS_SCRIPT})/..
 
 . ${REPO_DIR}/script/_setup_environment
 
-exec timeout 4.9m ${REPO_DIR}/watch.py
+exec timeout 4.9m ${REPO_DIR}/watch.py 2>&1 >> ~/run.log
